@@ -1,0 +1,104 @@
+# =============================================================================
+# InsightIQ – Docker Compose
+# =============================================================================
+# Development:  docker compose up -d
+# Production:   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# =============================================================================
+
+services:
+  # ── Backend API ─────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend
+    container_name: insightiq-api
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: development
+      APP_DEBUG: "true"
+      APP_LOG_LEVEL: INFO
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      API_RELOAD: "true"
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/insightiq
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - artifacts:/app/artifacts
+      - reports:/app/reports
+      - exports:/app/exports
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - insightiq
+
+  # ── Frontend ─────────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+      target: production
+      args:
+        VITE_API_BASE_URL: http://localhost:8000/api/v1
+    container_name: insightiq-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - insightiq
+
+  # ── Database ──────────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: insightiq-db
+    environment:
+      POSTGRES_DB: insightiq
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d insightiq"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - insightiq
+
+volumes:
+  postgres_data:
+    driver: local
+  artifacts:
+    driver: local
+  reports:
+    driver: local
+  exports:
+    driver: local
+
+networks:
+  insightiq:
+    driver: bridge

@@ -1,2 +1,14 @@
-"*.pyc"  
-"__pycache__/"  
+# Python
+.venv/
+__pycache__/
+*.pyc
+.env
+
+# Node.js
+node_modules/
+
+# Logs
+logs/
+
+# VS Code
+.vscode/

@@ -1,0 +1,89 @@
+"""Sales analytics module for enterprise business intelligence."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pandas as pd
+
+try:
+    from app.exceptions import ValidationError  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover
+    class ValidationError(ValueError):
+        """Fallback validation error when app package is not importable."""
+
+        pass
+
+
+class SalesAnalytics:
+    """Computes sales-level business metrics."""
+
+    @classmethod
+    def analyze(cls, df: pd.DataFrame) -> dict[str, Any]:
+        """Generate comprehensive sales analytics."""
+        required = {"order_date", "revenue"}
+        missing = required - set(df.columns)
+        if missing:
+            raise ValidationError(f"Missing required columns: {', '.join(sorted(missing))}")
+        if df.empty:
+            raise ValidationError("Dataset is empty.")
+
+        result = df.copy()
+        result["order_date"] = pd.to_datetime(result["order_date"], errors="coerce")
+        result["revenue"] = pd.to_numeric(result["revenue"], errors="coerce").fillna(0)
+        result = result.dropna(subset=["order_date"])
+
+        total_sales = float(result["revenue"].sum())
+        total_orders = int(len(result))
+
+        # Time-based aggregations
+        result["month"] = result["order_date"].dt.to_period("M").astype(str)
+        result["year"] = result["order_date"].dt.year
+        result["day"] = result["order_date"].dt.date
+
+        monthly = result.groupby("month")["revenue"].sum().to_dict()
+        daily = result.groupby("day")["revenue"].sum().to_dict()
+        yearly = result.groupby("year")["revenue"].sum().to_dict()
+
+        # Growth
+        monthly_series = pd.Series(monthly).sort_index()
+        growth = cls._compute_growth(monthly_series)
+
+        # AOV
+        avg_order_value = round(total_sales / max(total_orders, 1), 2)
+
+        # Top products/categories/customers
+        top_products = cls._top_by_column(result, "product_id" if "product_id" in result.columns else None, "revenue")
+        top_categories = cls._top_by_column(result, "category" if "category" in result.columns else None, "revenue")
+        top_customers = cls._top_by_column(result, "customer_id", "revenue")
+        sales_by_region = cls._top_by_column(result, "region" if "region" in result.columns else None, "revenue")
+        sales_by_channel = cls._top_by_column(result, "channel" if "channel" in result.columns else None, "revenue")
+
+        return {
+            "total_sales": round(total_sales, 2),
+            "total_orders": total_orders,
+            "monthly_sales": {k: round(v, 2) for k, v in monthly.items()},
+            "daily_sales": {str(k): round(v, 2) for k, v in daily.items()},
+            "yearly_sales": {str(k): round(v, 2) for k, v in yearly.items()},
+            "sales_growth": growth,
+            "average_order_value": avg_order_value,
+            "top_products": top_products,
+            "top_categories": top_categories,
+            "top_customers": top_customers,
+            "sales_by_region": sales_by_region,
+            "sales_by_channel": sales_by_channel,
+        }
+
+    @classmethod
+    def _top_by_column(cls, df: pd.DataFrame, column: str | None, value_col: str) -> dict[str, float]:
+        if column is None or column not in df.columns:
+            return {}
+        top = df.groupby(column)[value_col].sum().nlargest(10)
+        return {str(k): round(float(v), 2) for k, v in top.items()}
+
+    @classmethod
+    def _compute_growth(cls, series: pd.Series) -> dict[str, float]:
+        if len(series) < 2:
+            return {}
+        growth = series.pct_change().dropna() * 100
+        return {str(k): round(float(v), 2) for k, v in growth.items()}
